@@ -42,6 +42,7 @@ import TelegramUIDeclareEncodables
 import ContextMenuScreen
 import MetalEngine
 import RecaptchaEnterprise
+import GlassBackgroundComponent
 
 #if canImport(AppCenter)
 import AppCenter
@@ -320,7 +321,8 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         precondition(!testIsLaunched)
         testIsLaunched = true
-        
+        registerLiquidGlassSwitch()
+
         let _ = voipTokenPromise.get().start(next: { token in
             self.voipDeviceToken.set(.single(token))
         })

@@ -7,6 +7,14 @@ import UIKitRuntimeUtils
 import CoreImage
 import AppBundle
 
+public func registerLiquidGlassSwitch() {
+    if #unavailable(iOS 26.0) {
+        CustomSwitchViewFactory.createCustomSwitch = {
+            return LiquidGlassSwitch()
+        }
+    }
+}
+
 private final class ContentContainer: UIView {
     private let maskContentView: UIView
     
@@ -50,7 +58,7 @@ private final class ContentContainer: UIView {
     }
 }
 
-public class GlassBackgroundView: UIView {
+public class GlassBackgroundView: UIView, UIGestureRecognizerDelegate {
     public protocol ContentView: UIView {
         var tintMask: UIView { get }
     }
@@ -309,7 +317,9 @@ public class GlassBackgroundView: UIView {
     
     private let foregroundView: UIImageView?
     private let shadowView: UIImageView?
-    
+
+    private var liquidGlassView: LiquidGlassView?
+
     private let maskContainerView: UIView
     public let maskContentView: UIView
     private let contentContainer: ContentContainer
@@ -325,11 +335,9 @@ public class GlassBackgroundView: UIView {
     }
     
     public private(set) var params: Params?
-        
-    public static var useCustomGlassImpl: Bool = false
-    
+
     public override init(frame: CGRect) {
-        if #available(iOS 26.0, *), !GlassBackgroundView.useCustomGlassImpl {
+        if #available(iOS 26.0, *) {
             self.backgroundNode = nil
             
             let glassEffect = UIGlassEffect(style: .regular)
@@ -342,18 +350,16 @@ public class GlassBackgroundView: UIView {
             self.nativeParamsView = nativeParamsView
             
             nativeParamsView.addSubview(nativeView)
-            
+
             self.foregroundView = nil
             self.shadowView = nil
         } else {
-            let backgroundNode = NavigationBackgroundNode(color: .black, enableBlur: true, customBlurRadius: 8.0)
-            self.backgroundNode = backgroundNode
+            self.backgroundNode = nil
             self.nativeView = nil
             self.nativeViewClippingContext = nil
             self.nativeParamsView = nil
-            self.foregroundView = UIImageView()
-            
-            self.shadowView = UIImageView()
+            self.foregroundView = nil
+            self.shadowView = nil
         }
         
         self.maskContainerView = UIView()
@@ -368,7 +374,9 @@ public class GlassBackgroundView: UIView {
         self.contentContainer = ContentContainer(maskContentView: self.maskContentView)
         
         super.init(frame: frame)
-        
+
+        self.clipsToBounds = false
+
         if let shadowView = self.shadowView {
             self.addSubview(shadowView)
         }
@@ -401,12 +409,164 @@ public class GlassBackgroundView: UIView {
         }
         return nil
     }
-        
+
+    public override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if #unavailable(iOS 26.0) {
+            if window != nil && self.liquidGlassView == nil {
+                var sourceView: UIView = window!
+                if let rootVC = window!.rootViewController {
+                    sourceView = rootVC.view
+                }
+                let glassView = LiquidGlassView(sourceView: sourceView)
+                glassView.cornerRadius = bounds.height * 0.5
+                glassView.refractionStrength = 0.5
+                glassView.frame = bounds
+                self.insertSubview(glassView, at: 0)
+                self.liquidGlassView = glassView
+
+                setupStretchGesture()
+            }
+        }
+    }
+
+    private var stretchPanGesture: UIPanGestureRecognizer?
+    private var baseGlassFrame: CGRect = .zero
+    private var horizontalDragAmount: CGFloat = 0
+    private var verticalDragAmount: CGFloat = 0
+
+    private func setupStretchGesture() {
+        guard stretchPanGesture == nil else { return }
+
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handleStretchPan(_:)))
+        pan.delegate = self
+        self.addGestureRecognizer(pan)
+        stretchPanGesture = pan
+    }
+
+    @objc private func handleStretchPan(_ gesture: UIPanGestureRecognizer) {
+        guard let liquidGlassView = self.liquidGlassView else { return }
+
+        switch gesture.state {
+        case .began:
+            baseGlassFrame = liquidGlassView.frame
+
+        case .changed:
+            let translation = gesture.translation(in: self)
+
+            let hDistance = abs(translation.x)
+            let hNormalized = min(1.0, pow(hDistance / 200.0, 0.65))
+            horizontalDragAmount = translation.x >= 0 ? hNormalized : -hNormalized
+
+            let vDistance = abs(translation.y)
+            let vNormalized = min(1.0, pow(vDistance / 200.0, 0.65))
+            verticalDragAmount = translation.y >= 0 ? vNormalized : -vNormalized
+
+            applyStretchFrame(to: liquidGlassView)
+            applyContentOffset()
+
+        case .ended, .cancelled, .failed:
+            horizontalDragAmount = 0
+            verticalDragAmount = 0
+
+            UIView.animate(
+                withDuration: 0.4,
+                delay: 0,
+                usingSpringWithDamping: 0.6,
+                initialSpringVelocity: 0,
+                options: [.beginFromCurrentState],
+                animations: {
+                    liquidGlassView.frame = self.baseGlassFrame
+                    self.contentContainer.transform = .identity
+                }
+            )
+
+        default:
+            break
+        }
+    }
+
+    private func applyStretchFrame(to liquidGlassView: LiquidGlassView) {
+        let baseWidth = baseGlassFrame.width
+        let baseHeight = baseGlassFrame.height
+
+        let hStretch = abs(horizontalDragAmount) * baseWidth * 0.10
+        let hOffset = horizontalDragAmount * 6.0
+        var leftExpansion: CGFloat = 0
+        var rightExpansion: CGFloat = 0
+        if horizontalDragAmount < 0 {
+            leftExpansion = hStretch
+        } else if horizontalDragAmount > 0 {
+            rightExpansion = hStretch
+        }
+
+        let vStretch = abs(verticalDragAmount) * baseHeight * 0.13
+        let vOffset = verticalDragAmount * 4.0
+        var topExpansion: CGFloat = 0
+        var bottomExpansion: CGFloat = 0
+        if verticalDragAmount < 0 {
+            topExpansion = vStretch
+        } else if verticalDragAmount > 0 {
+            bottomExpansion = vStretch
+        }
+
+        let stretchedFrame = CGRect(
+            x: baseGlassFrame.origin.x - leftExpansion + hOffset,
+            y: baseGlassFrame.origin.y - topExpansion + vOffset,
+            width: baseWidth + leftExpansion + rightExpansion,
+            height: baseHeight + topExpansion + bottomExpansion
+        )
+
+        liquidGlassView.frame = stretchedFrame
+    }
+
+    private func applyContentOffset() {
+        let hOffset = horizontalDragAmount * 7.2
+        let vOffset = verticalDragAmount * 4.8
+
+        let hStretchFactor = 1.0 + abs(horizontalDragAmount) * 0.08
+        let vStretchFactor = 1.0 + abs(verticalDragAmount) * 0.08
+
+        let translation = CGAffineTransform(translationX: hOffset, y: vOffset)
+        let scale = CGAffineTransform(scaleX: hStretchFactor, y: vStretchFactor)
+        contentContainer.transform = translation.concatenating(scale)
+    }
+
+    public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        return true
+    }
+
     public func update(size: CGSize, cornerRadius: CGFloat, isDark: Bool, tintColor: TintColor, isInteractive: Bool = false, transition: ComponentTransition) {
         self.update(size: size, shape: .roundedRect(cornerRadius: cornerRadius), isDark: isDark, tintColor: tintColor, isInteractive: isInteractive, transition: transition)
     }
     
     public func update(size: CGSize, shape: Shape, isDark: Bool, tintColor: TintColor, isInteractive: Bool = false, transition: ComponentTransition) {
+        if #unavailable(iOS 26.0) {
+            let cornerRadius: CGFloat
+            switch shape {
+            case let .roundedRect(cr):
+                cornerRadius = cr
+            }
+
+            if self.liquidGlassView == nil, let window = self.window {
+                var sourceView: UIView = window
+                if let rootVC = window.rootViewController {
+                    sourceView = rootVC.view
+                }
+
+                let glassView = LiquidGlassView(sourceView: sourceView)
+                glassView.cornerRadius = cornerRadius
+                glassView.refractionStrength = 0.5
+                self.insertSubview(glassView, at: 0)
+                self.liquidGlassView = glassView
+            }
+
+            if let liquidGlassView = self.liquidGlassView {
+                liquidGlassView.cornerRadius = cornerRadius
+                transition.setFrame(view: liquidGlassView, frame: CGRect(origin: .zero, size: size))
+            }
+        }
+
         if let nativeView = self.nativeView, let nativeViewClippingContext = self.nativeViewClippingContext, (nativeView.bounds.size != size || nativeViewClippingContext.shape != shape) {
             
             nativeViewClippingContext.update(shape: shape, size: size, transition: transition)

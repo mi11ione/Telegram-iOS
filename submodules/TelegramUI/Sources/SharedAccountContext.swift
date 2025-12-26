@@ -483,16 +483,13 @@ public final class SharedAccountContextImpl: SharedAccountContext {
         
         let immediateExperimentalUISettingsValue = self.immediateExperimentalUISettingsValue
         let _ = immediateExperimentalUISettingsValue.swap(initialPresentationDataAndSettings.experimentalUISettings)
-        
-        GlassBackgroundView.useCustomGlassImpl = immediateExperimentalUISettingsValue.with({ $0.fakeGlass })
-        
+                
         self.experimentalUISettingsDisposable = (self.accountManager.sharedData(keys: [ApplicationSpecificSharedDataKeys.experimentalUISettings])
         |> deliverOnMainQueue).start(next: { sharedData in
             if let settings = sharedData.entries[ApplicationSpecificSharedDataKeys.experimentalUISettings]?.get(ExperimentalUISettings.self) {
                 let _ = immediateExperimentalUISettingsValue.swap(settings)
                 
                 flatBuffers_checkedGet = settings.checkSerializedData
-                GlassBackgroundView.useCustomGlassImpl = settings.fakeGlass
             }
         })
         

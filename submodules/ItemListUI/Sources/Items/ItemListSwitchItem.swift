@@ -229,8 +229,12 @@ public class ItemListSwitchItemNode: ListViewItemNode, ItemListItemNode {
     
     override public func didLoad() {
         super.didLoad()
-        
-        (self.switchNode.view as? UISwitch)?.addTarget(self, action: #selector(self.switchValueChanged(_:)), for: .valueChanged)
+
+        if let switchView = self.switchNode.view as? UISwitch {
+            switchView.addTarget(self, action: #selector(self.switchValueChanged(_:)), for: .valueChanged)
+        } else if let customSwitch = self.switchNode.view as? CustomSwitchView {
+            customSwitch.addTarget(self, action: #selector(self.customSwitchValueChanged(_:)), for: .valueChanged)
+        }
         self.switchGestureNode.view.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(self.tapGesture(_:))))
     }
     
@@ -510,6 +514,15 @@ public class ItemListSwitchItemNode: ListViewItemNode, ItemListItemNode {
                             switchView.setOn(item.value, animated: animated)
                         }
                         switchView.isUserInteractionEnabled = item.enableInteractiveChanges
+                    } else if let customSwitch = strongSelf.switchNode.view as? CustomSwitchView {
+                        let switchSize = customSwitch.intrinsicContentSize
+
+                        transition.updateFrame(node: strongSelf.switchNode, frame: CGRect(origin: CGPoint(x: params.width - params.rightInset - switchSize.width - 15.0, y: floor((contentSize.height - switchSize.height) / 2.0)), size: switchSize))
+                        strongSelf.switchGestureNode.frame = strongSelf.switchNode.frame
+                        if customSwitch.isOn != item.value {
+                            customSwitch.setOn(item.value, animated: animated)
+                        }
+                        customSwitch.isUserInteractionEnabled = item.enableInteractiveChanges
                     }
                     strongSelf.switchGestureNode.isHidden = item.enableInteractiveChanges && item.enabled
                     
@@ -602,6 +615,10 @@ public class ItemListSwitchItemNode: ListViewItemNode, ItemListItemNode {
         } else if let switchNode = self.switchNode as? SwitchNode {
             switchNode.isOn = !switchNode.isOn
             item.updated(switchNode.isOn)
+        } else if let customSwitch = self.switchNode.view as? CustomSwitchView {
+            let newValue = !customSwitch.isOn
+            customSwitch.isOn = newValue
+            item.updated(newValue)
         }
         return true
     }
@@ -662,11 +679,27 @@ public class ItemListSwitchItemNode: ListViewItemNode, ItemListItemNode {
             item.updated(value)
         }
     }
-    
+
+    @objc private func customSwitchValueChanged(_ control: UIControl) {
+        if let item = self.item, let customSwitch = control as? CustomSwitchView {
+            let value = customSwitch.isOn
+            item.updated(value)
+        }
+    }
+
     @objc private func tapGesture(_ recognizer: UITapGestureRecognizer) {
-        if let item = self.item, let switchView = self.switchNode.view as? UISwitch, case .ended = recognizer.state {
+        guard let item = self.item, case .ended = recognizer.state else { return }
+
+        if let switchView = self.switchNode.view as? UISwitch {
             if item.enabled && !item.displayLocked {
                 let value = switchView.isOn
+                item.updated(!value)
+            } else {
+                item.activatedWhileDisabled()
+            }
+        } else if let customSwitch = self.switchNode.view as? CustomSwitchView {
+            if item.enabled && !item.displayLocked {
+                let value = customSwitch.isOn
                 item.updated(!value)
             } else {
                 item.activatedWhileDisabled()

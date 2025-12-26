@@ -4,6 +4,8 @@ import Display
 import ComponentFlow
 import GlassBackgroundComponent
 
+private let useCustomLensGlass = true
+
 private final class RestingBackgroundView: UIVisualEffectView {
     var isDark: Bool?
 
@@ -97,6 +99,8 @@ public final class LiquidLensView: UIView {
     private var legacyContentMaskView: UIView?
     private var legacyContentMaskBlobView: UIImageView?
     private var legacyLiftedContentBlobMaskView: UIImageView?
+
+    private var customGlassView: LiquidLensGlassView?
 
     public var selectedContentView: UIView {
         return self.liftedContainerView
@@ -216,6 +220,22 @@ public final class LiquidLensView: UIView {
             self.liftedContainerView.mask = legacyLiftedContentBlobMaskView
             
             self.containerView.addSubview(self.liftedContainerView)
+
+            if useCustomLensGlass {
+                let glassView = LiquidLensGlassView()
+                glassView.isUserInteractionEnabled = false
+                glassView.clipsToBounds = false
+                glassView.layer.zPosition = 100
+                self.customGlassView = glassView
+                self.backgroundView.contentView.addSubview(glassView)
+                self.backgroundView.clipsToBounds = false
+                self.backgroundView.contentView.clipsToBounds = false
+                self.containerView.clipsToBounds = false
+                self.backgroundContainer.clipsToBounds = false
+                self.backgroundContainer.contentView.clipsToBounds = false
+                self.backgroundContainerContainer.clipsToBounds = false
+                self.clipsToBounds = false
+            }
         }
     }
 
@@ -350,6 +370,15 @@ public final class LiquidLensView: UIView {
             
             legacySelectionView.tintColor = UIColor(white: params.isDark ? 1.0 : 0.0, alpha: params.isDark ? 0.1 : 0.075)
             transition.setFrame(view: legacySelectionView, frame: effectiveLensFrame)
+
+            if let customGlassView = self.customGlassView {
+                customGlassView.setTabBarContentView(self.containerView)
+                customGlassView.setLifted(params.isLifted)
+                customGlassView.setBaseFrame(effectiveLensFrame)
+                if customGlassView.frame.isEmpty {
+                    customGlassView.frame = effectiveLensFrame
+                }
+            }
         }
 
         transition.setFrame(view: self.restingBackgroundView, frame: CGRect(origin: CGPoint(), size: params.size))

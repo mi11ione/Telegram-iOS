@@ -4,6 +4,7 @@ import Display
 import AsyncDisplayKit
 import ComponentFlow
 import TelegramPresentationData
+import GlassBackgroundComponent
 
 public final class SwitchComponent: Component {
     public typealias EnvironmentType = Empty
@@ -33,18 +34,13 @@ public final class SwitchComponent: Component {
     }
     
     public final class View: UIView {
-        private let switchView: UISwitch
-    
+        private var nativeSwitchView: UISwitch?
+        private var liquidGlassSwitch: LiquidGlassSwitch?
+
         private var component: SwitchComponent?
         
         override init(frame: CGRect) {
-            self.switchView = UISwitch()
-            
             super.init(frame: frame)
-            
-            self.addSubview(self.switchView)
-            
-            self.switchView.addTarget(self, action: #selector(self.valueChanged(_:)), for: .valueChanged)
         }
         
         required init?(coder: NSCoder) {
@@ -52,19 +48,65 @@ public final class SwitchComponent: Component {
         }
         
         @objc func valueChanged(_ sender: Any) {
-            self.component?.valueUpdated(self.switchView.isOn)
+            if let nativeSwitchView = self.nativeSwitchView {
+                self.component?.valueUpdated(nativeSwitchView.isOn)
+            } else if let liquidGlassSwitch = self.liquidGlassSwitch {
+                self.component?.valueUpdated(liquidGlassSwitch.isOn)
+            }
         }
         
         func update(component: SwitchComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: ComponentTransition) -> CGSize {
             self.component = component
-          
-            self.switchView.tintColor = component.tintColor
-            self.switchView.setOn(component.value, animated: !transition.animation.isImmediate)
-            
-            self.switchView.sizeToFit()
-            self.switchView.frame = CGRect(origin: .zero, size: self.switchView.frame.size)
-                        
-            return self.switchView.frame.size
+
+            if #unavailable(iOS 26.0) {
+                if let nativeSwitchView = self.nativeSwitchView {
+                    nativeSwitchView.removeFromSuperview()
+                    self.nativeSwitchView = nil
+                }
+
+                let liquidSwitch: LiquidGlassSwitch
+                if let existing = self.liquidGlassSwitch {
+                    liquidSwitch = existing
+                } else {
+                    liquidSwitch = LiquidGlassSwitch()
+                    liquidSwitch.addTarget(self, action: #selector(self.valueChanged(_:)), for: .valueChanged)
+                    self.addSubview(liquidSwitch)
+                    self.liquidGlassSwitch = liquidSwitch
+                }
+
+                if let tintColor = component.tintColor {
+                    liquidSwitch.onTintColor = tintColor
+                }
+                liquidSwitch.setOn(component.value, animated: !transition.animation.isImmediate)
+
+                let size = liquidSwitch.intrinsicContentSize
+                liquidSwitch.frame = CGRect(origin: .zero, size: size)
+
+                return size
+            } else {
+                if let liquidGlassSwitch = self.liquidGlassSwitch {
+                    liquidGlassSwitch.removeFromSuperview()
+                    self.liquidGlassSwitch = nil
+                }
+
+                let switchView: UISwitch
+                if let existing = self.nativeSwitchView {
+                    switchView = existing
+                } else {
+                    switchView = UISwitch()
+                    switchView.addTarget(self, action: #selector(self.valueChanged(_:)), for: .valueChanged)
+                    self.addSubview(switchView)
+                    self.nativeSwitchView = switchView
+                }
+
+                switchView.tintColor = component.tintColor
+                switchView.setOn(component.value, animated: !transition.animation.isImmediate)
+
+                switchView.sizeToFit()
+                switchView.frame = CGRect(origin: .zero, size: switchView.frame.size)
+
+                return switchView.frame.size
+            }
         }
     }
 

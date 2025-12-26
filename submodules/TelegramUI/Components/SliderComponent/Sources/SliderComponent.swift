@@ -5,6 +5,7 @@ import AsyncDisplayKit
 import TelegramPresentationData
 import LegacyComponents
 import ComponentFlow
+import GlassBackgroundComponent
 
 public final class SliderComponent: Component {
     public final class Discrete: Equatable {
@@ -124,12 +125,13 @@ public final class SliderComponent: Component {
     public final class View: UIView {
         private var nativeSliderView: SliderView?
         private var sliderView: TGPhotoEditorSliderView?
-        
+        private var liquidGlassSlider: LiquidGlassSlider?
+
         private var component: SliderComponent?
         private weak var state: EmptyComponentState?
         
         public var hitTestTarget: UIView? {
-            return self.sliderView
+            return self.liquidGlassSlider ?? self.sliderView
         }
         
         override public init(frame: CGRect) {
@@ -141,7 +143,8 @@ public final class SliderComponent: Component {
         }
                 
         public func cancelGestures() {
-            if let sliderView = self.sliderView, let gestureRecognizers = sliderView.gestureRecognizers {
+            let targetView: UIView? = self.liquidGlassSlider ?? self.sliderView
+            if let targetView = targetView, let gestureRecognizers = targetView.gestureRecognizers {
                 for gestureRecognizer in gestureRecognizers {
                     if gestureRecognizer.isEnabled {
                         gestureRecognizer.isEnabled = false
@@ -158,6 +161,11 @@ public final class SliderComponent: Component {
             let size = CGSize(width: availableSize.width, height: 44.0)
             
             if #available(iOS 26.0, *), component.useNative {
+                self.liquidGlassSlider?.removeFromSuperview()
+                self.liquidGlassSlider = nil
+                self.sliderView?.removeFromSuperview()
+                self.sliderView = nil
+
                 let sliderView: SliderView
                 if let current = self.nativeSliderView {
                     sliderView = current
@@ -190,7 +198,52 @@ public final class SliderComponent: Component {
                 sliderView.maximumTrackTintColor = component.trackBackgroundColor
                 
                 transition.setFrame(view: sliderView, frame: CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: CGSize(width: availableSize.width, height: 44.0)))
+            } else if #unavailable(iOS 26.0), component.useNative {
+                self.nativeSliderView?.removeFromSuperview()
+                self.nativeSliderView = nil
+                self.sliderView?.removeFromSuperview()
+                self.sliderView = nil
+
+                let liquidSlider: LiquidGlassSlider
+                if let current = self.liquidGlassSlider {
+                    liquidSlider = current
+                } else {
+                    liquidSlider = LiquidGlassSlider()
+                    liquidSlider.addTarget(self, action: #selector(self.liquidSliderValueChanged), for: .valueChanged)
+
+                    switch component.content {
+                    case let .continuous(continuous):
+                        liquidSlider.minimumValue = continuous.minValue ?? 0.0
+                        liquidSlider.maximumValue = 1.0
+                    case let .discrete(discrete):
+                        liquidSlider.minimumValue = 0.0
+                        liquidSlider.maximumValue = CGFloat(discrete.valueCount - 1)
+                    }
+
+                    self.addSubview(liquidSlider)
+                    self.liquidGlassSlider = liquidSlider
+                }
+
+                liquidSlider.trackTintColor = component.trackForegroundColor
+                liquidSlider.trackBackgroundColor = component.trackBackgroundColor
+                liquidSlider.isTrackingUpdated = component.isTrackingUpdated
+
+                switch component.content {
+                case let .continuous(continuous):
+                    if liquidSlider.value != continuous.value {
+                        liquidSlider.value = continuous.value
+                    }
+                case let .discrete(discrete):
+                    let discreteValue = CGFloat(discrete.value)
+                    if liquidSlider.value != discreteValue {
+                        liquidSlider.value = discreteValue
+                    }
+                }
+
+                transition.setFrame(view: liquidSlider, frame: CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: CGSize(width: availableSize.width, height: 44.0)))
             } else {
+                self.liquidGlassSlider?.removeFromSuperview()
+                self.liquidGlassSlider = nil
                 var internalIsTrackingUpdated: ((Bool) -> Void)?
                 if let isTrackingUpdated = component.isTrackingUpdated {
                     internalIsTrackingUpdated = { [weak self] isTracking in
@@ -314,6 +367,19 @@ public final class SliderComponent: Component {
             } else {
                 return
             }
+            switch component.content {
+            case let .discrete(discrete):
+                discrete.valueUpdated(Int(floatValue))
+            case let .continuous(continuous):
+                continuous.valueUpdated(floatValue)
+            }
+        }
+
+        @objc private func liquidSliderValueChanged() {
+            guard let component = self.component, let liquidSlider = self.liquidGlassSlider else {
+                return
+            }
+            let floatValue = liquidSlider.value
             switch component.content {
             case let .discrete(discrete):
                 discrete.valueUpdated(Int(floatValue))
